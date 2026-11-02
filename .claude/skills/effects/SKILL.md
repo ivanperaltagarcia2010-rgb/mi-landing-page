@@ -5,38 +5,41 @@ description: Add any of 45 video effects to a talking-head video (orbit, spotlig
 
 # Effects: 45 starter video effects (by @vibha.in.progress)
 
-The user is usually not technical. Keep replies short and friendly, do the work for them, and never ask them to run commands themselves.
+The user is usually not technical. Reply in the user's language, keep replies short and friendly, do all the work yourself, and never ask them to run commands.
 
-All paths below are relative to this skill's folder (the folder this SKILL.md is in). Use its absolute path in commands.
+`SKILL` below means the absolute path of this skill's folder (the folder this SKILL.md is in, e.g. `/mnt/skills/user/effects` in the Claude app). It may be read-only: never write files inside it.
 
-## 1. First run: set up (once)
-Run `bash scripts/setup.sh`. It prints `READY` when done (the first time takes 1 to 3 minutes).
-- `NEED_FFMPEG`: install it for them. On a Mac: `brew install ffmpeg` (if `brew` is missing, tell them to install Homebrew from brew.sh first). On Windows: `winget install ffmpeg`.
-- `NEED_PYTHON`: install Python 3.12 (Mac: `brew install python@3.12`, Windows: `winget install Python.Python.3.12`), then run setup again.
-- On Windows, the Python is at `.venv\Scripts\python.exe` instead of `.venv/bin/python`.
+## 1. Set up (once per conversation)
+Run `bash SKILL/scripts/setup.sh`. The last line is `READY <python>`: use that exact python as `PY` for every script below. Takes a few seconds if numpy/pillow/opencv are already there, 1 to 3 minutes otherwise.
+- `NEED_FFMPEG` (only on a computer): Mac `brew install ffmpeg` (if `brew` is missing, tell them to install Homebrew from brew.sh first), Windows `winget install ffmpeg`. Then run setup again.
+- `NEED_PYTHON` (only on a computer): Mac `brew install python@3.12`, Windows `winget install Python.Python.3.12`. Then run setup again.
+- `SETUP_FAILED` in the Claude app: package downloads are blocked. Tell them in one line to allow network access for code execution in Settings (Capabilities), then try again.
 
 ## 2. Get the video and the effect
-- Video: the user drags the file into the chat, or gives a path. A vertical phone video works best.
-- Effect: from `/effects <name>`, or from what they describe. Match their words to the table below. Unsure? Show them the list.
+- Video: in the Claude app the user attaches it to the chat; it arrives under `/mnt/user-data/uploads/`. Otherwise they drag it in or give a path. A short vertical phone video works best (the app has an upload size limit, so suggest a short clip or a compressed export if the file is very large).
+- Effect: from `/effects <name>`, or from what they describe. Match their words to the table below. Unsure? Show them the list (names plus one line each).
+- Work in a writable folder: `/home/claude/effects-work` in the Claude app, or next to their video on a computer. Call it `WORK`.
 
 ## 3. Find the timing
-- If they say "on the word X" or "when I say ...", run `.venv/bin/python scripts/words.py <video>` and use those times.
+- If they say "on the word X" or "when I say ...", run `PY SKILL/scripts/words.py <video> WORK/<name>.words.json` and use those times. If it prints `NO_TRANSCRIBER`, ask them for the rough second instead (one short question).
 - If they give no timing, apply the effect for the whole clip, or ask which part (one short question).
 - Short windows look best: 1.5 to 4 seconds per effect.
 
 ## 4. Draft, check, render
-1. Write the plan next to their video as `<video-name>_effects.json`:
+1. Write the plan as `WORK/<video-name>_effects.json`:
    ```json
    {"effects": [
      {"fx": "orbit", "start": 3.2, "end": 6.0},
      {"fx": "backdrop-word", "start": 14.0, "end": 16.3, "text": "CLAUDE"}
    ]}
    ```
-2. Check frames first (fast): `.venv/bin/python scripts/fx.py --plan <plan.json> <video> <folder>/check.png --still 4.5,15.2`, using the middle of each effect. Look at the PNGs yourself. Fix the text, timing or options if something looks off (covers the face, cut off by the edge, unreadable).
-3. Render: `.venv/bin/python scripts/fx.py --plan <plan.json> <video> <video-name>_effects.mp4`. The output keeps their original audio. It renders at 1080p by default; add `--width 2160` for 4K (slower).
-4. Tell them where the file is. Remind them in one line to watch it before posting: it drafts, they approve.
+2. Check frames first (fast): `PY SKILL/scripts/fx.py --plan <plan.json> <video> WORK/check.png --still 4.5,15.2`, using the middle of each effect. Look at the PNGs yourself. Fix the text, timing or options if something looks off (covers the face, cut off by the edge, unreadable).
+3. Render: `PY SKILL/scripts/fx.py --plan <plan.json> <video> <out.mp4>`. In the Claude app write it to `/mnt/user-data/outputs/<video-name>_effects.mp4` and share that file with the user; on a computer save it next to their video. The output keeps their original audio. It renders at 1080p by default; add `--width 2160` for 4K (much slower, avoid in the Claude app).
+4. Give them the file. Remind them in one line to watch it before posting: it drafts, they approve.
 
-A single effect needs no plan: `.venv/bin/python scripts/fx.py orbit <video> <out.mp4> --start 3 --end 6 --text "..." --opt key=value`.
+A single effect needs no plan: `PY SKILL/scripts/fx.py orbit <video> <out.mp4> --start 3 --end 6 --text "..." --opt key=value`.
+
+Effects that use `images` (orbit, noise, profile-wall, carousel-spin, phone-fan, place-in-grid, check-pills, broll-split) look best with the user's own reel covers or clips: ask them to attach a few, copy them into `WORK/images/` and pass `"images": "WORK/images"`. Without images they use frames from the video itself.
 
 ## The 45 effects
 | # | `fx` name | What it does | Options (all optional) |

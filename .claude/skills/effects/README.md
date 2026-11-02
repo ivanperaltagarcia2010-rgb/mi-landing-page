@@ -6,7 +6,14 @@ Made by [@vibha.in.progress](https://instagram.com/vibha.in.progress) 💛
 
 ![All 45 effects](assets/preview.jpg)
 
-## Install (one line)
+## Install in the Claude app (chat, no terminal)
+
+1. Download `dist/effects.zip` from this repo.
+2. In claude.ai or the Claude desktop/mobile app: **Settings → Capabilities**, turn on **Code execution and file creation** (and allow network access so it can install its Python packages the first time).
+3. **Settings → Capabilities → Skills → Upload skill**, pick `effects.zip`.
+4. In any chat, attach your video, type `/` and pick **effects** (or just write "ponle el efecto orbit del segundo 3 al 6").
+
+## Install in Claude Code (one line)
 
 Open the Terminal app (or the terminal inside Claude Code) and paste:
 

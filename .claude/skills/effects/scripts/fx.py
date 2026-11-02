@@ -6,9 +6,23 @@ Many effects:  python fx.py --plan plan.json in.mp4 out.mp4
 Quick check:   python fx.py --plan plan.json in.mp4 check.png --still 4.5
 List them:     python fx.py --list
 """
-import argparse, json, math, os, random, subprocess, sys
+import argparse, json, math, os, random, shutil, subprocess, sys
 import numpy as np
 import cv2
+
+
+def _ffmpeg():
+    # System ffmpeg if present, otherwise the binary bundled with the imageio-ffmpeg package (for sandboxes without ffmpeg).
+    exe = shutil.which('ffmpeg')
+    if exe: return exe
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        sys.exit('ffmpeg not found: run scripts/setup.sh first')
+
+
+FFMPEG = _ffmpeg()
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -2068,16 +2082,24 @@ if os.path.exists(_PRIV): exec(open(_PRIV).read(), globals())
 
 # ---------- video in/out + tracking ----------
 def probe(path):
-    j = json.loads(subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate:format=duration',
-                                   '-of', 'json', path], capture_output=True, text=True, check=True).stdout)
-    fr = j['streams'][0]['r_frame_rate']; num, den = fr.split('/'); fps = float(num) / float(den or 1)
-    png = subprocess.run(['ffmpeg', '-v', 'error', '-i', path, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'], capture_output=True, check=True).stdout
+    if shutil.which('ffprobe'):
+        j = json.loads(subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate:format=duration',
+                                       '-of', 'json', path], capture_output=True, text=True, check=True).stdout)
+        fr = j['streams'][0]['r_frame_rate']; dur = float(j['format']['duration'])
+    else:  # no ffprobe (e.g. imageio-ffmpeg only): read fps and duration from ffmpeg's own banner
+        import re
+        info = subprocess.run([FFMPEG, '-hide_banner', '-i', path], capture_output=True, text=True).stderr
+        hh, mm, ss = re.search(r'Duration: (\d+):(\d+):([\d.]+)', info).groups(); dur = int(hh) * 3600 + int(mm) * 60 + float(ss)
+        fps_m = re.search(r'Video:.*?([\d.]+) fps', info); tbr_m = re.search(r'Video:.*?([\d.]+) tbr', info)
+        fr = (fps_m or tbr_m).group(1) if (fps_m or tbr_m) else '30'
+    num, den = (fr.split('/') + ['1'])[:2]; fps = float(num) / float(den or 1)
+    png = subprocess.run([FFMPEG, '-v', 'error', '-i', path, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'], capture_output=True, check=True).stdout
     h, w = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR).shape[:2]
-    return (fr if fps <= 30.5 else '30'), min(fps, 30.0), float(j['format']['duration']), w, h
+    return (fr if fps <= 30.5 else '30'), min(fps, 30.0), dur, w, h
 
 
 def read_frames(path, W, H, fr):
-    p = subprocess.Popen(['ffmpeg', '-v', 'error', '-i', path, '-vf', f'fps={fr},scale={W}:{H}:flags=bicubic,format=rgb24', '-f', 'rawvideo', '-'],
+    p = subprocess.Popen([FFMPEG, '-v', 'error', '-i', path, '-vf', f'fps={fr},scale={W}:{H}:flags=bicubic,format=rgb24', '-f', 'rawvideo', '-'],
                          stdout=subprocess.PIPE, bufsize=10 ** 8)
     n = W * H * 3
     try:
@@ -2097,21 +2119,20 @@ def guided(I, p, r=8, eps=2e-3):
 
 
 class Tracker:
+    # Person cut-out: the MediaPipe Selfie Segmenter model, run through OpenCV's DNN module (same model, same output,
+    # no mediapipe package needed, so it also works in sandboxes without GPU/EGL libraries).
     def __init__(self, aw, ah):
-        import mediapipe as mp
-        from mediapipe.tasks.python import vision
-        from mediapipe.tasks.python.core.base_options import BaseOptions
-        self.mp = mp
-        self.seg = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
-            base_options=BaseOptions(model_asset_path=os.path.join(ROOT, 'models', 'selfie_segmenter.tflite')),
-            running_mode=vision.RunningMode.VIDEO, output_confidence_masks=True, output_category_mask=False))
+        self.seg = cv2.dnn.readNetFromTFLite(os.path.join(ROOT, 'models', 'selfie_segmenter.tflite'))
         self.fd = cv2.FaceDetectorYN.create(os.path.join(ROOT, 'models', 'yunet.onnx'), '', (aw, ah), 0.6, 0.3, 20)
         self.prev = None
 
+    def segment(self, rgb):
+        x = cv2.resize(rgb, (256, 256), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255.0
+        self.seg.setInput(np.ascontiguousarray(x.transpose(2, 0, 1)[None]))
+        return self.seg.forward().reshape(256, 256).astype(np.float32)
+
     def __call__(self, rgb, ms):
-        img = self.mp.Image(image_format=self.mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb))
-        ms_ = self.seg.segment_for_video(img, ms).confidence_masks
-        m = ms_[-1].numpy_view().astype(np.float32); m = m.reshape(m.shape[0], m.shape[1])
+        m = self.segment(rgb)
         if m.shape[:2] != rgb.shape[:2]: m = cv2.resize(m, (rgb.shape[1], rgb.shape[0]))
         m = guided(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255, m)
         m = np.clip((m - 0.5) * 1.6 + 0.5, 0, 1)
@@ -2212,7 +2233,7 @@ def main():
     stills = sorted({int(round(float(s) * fps)) for s in a.still.split(',')}) if a.still else None
     enc = None
     if not stills:
-        enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{W}x{H}', '-r', str(fr), '-i', '-',
+        enc = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{W}x{H}', '-r', str(fr), '-i', '-',
                                 '-i', src, '-map', '0:v', '-map', '1:a:0?', '-c:v', 'libx264', '-crf', '17', '-preset', 'medium', '-pix_fmt', 'yuv420p',
                                 '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', dst], stdin=subprocess.PIPE)
     print('Pass 2: adding the effects...', flush=True)
