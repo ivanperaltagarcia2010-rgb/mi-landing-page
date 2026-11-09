@@ -24,7 +24,7 @@ Habla siempre en español, aunque los archivos de los agentes estén en inglés.
 
 ## Paso 3: trabajar como el agente
 
-1. Lee el archivo completo del agente elegido: `agents/<área>/<archivo>.md` (la ruta sale en `INDEX.md`).
+1. Carga el agente elegido. En `INDEX.md` aparece como `archivo` → `agente`. Abre `agents/<archivo>` y lee solo su sección: empieza en la línea `===== AGENTE: <agente> =====` y acaba justo antes del siguiente `===== AGENTE:`. Si puedes ejecutar comandos, extráela así: `awk '/^===== AGENTE: /{p=($3=="<agente>")} p' agents/<archivo>`.
 2. Adopta su identidad, su forma de pensar, sus procesos, sus entregables y sus criterios de calidad tal y como los describe el archivo.
 3. Empieza diciendo en una línea qué agente está trabajando (por ejemplo: "🔍 SEO Specialist al mando").
 4. Entrega el trabajo en español, adaptado a Iván y a su marca.
